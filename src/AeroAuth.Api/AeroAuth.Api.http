@@ -1,0 +1,92 @@
+### VS Code REST Client (humao.rest-client). Run schema.sql and seed.sql first, then start the API (F5).
+@host = http://localhost:5080
+
+### 1. Sign in as Admin QA and as the KAC (External AMO) user
+# @name adminLogin
+POST {{host}}/api/auth/dev-login
+Content-Type: application/json
+
+{ "identity": "admin@aeroauth.local" }
+
+###
+@adminToken = {{adminLogin.response.body.token}}
+
+# @name kacLogin
+POST {{host}}/api/auth/dev-login
+Content-Type: application/json
+
+{ "identity": "kac.user@aeroauth.local" }
+
+###
+@kacToken = {{kacLogin.response.body.token}}
+
+### 2. Tenant scoping: KAC sees only KAC staff
+GET {{host}}/api/staff
+Authorization: Bearer {{kacToken}}
+
+### 3. Admin QA sees every organization
+GET {{host}}/api/staff
+Authorization: Bearer {{adminToken}}
+
+### 4. Staff with AML and scope in one query (multi-mapping)
+GET {{host}}/api/staff/1
+Authorization: Bearer {{adminToken}}
+
+### 5. Tenant check: KAC asks for a RAMCO staff member (id 2). Result: 404, not another organization's data
+GET {{host}}/api/staff/2
+Authorization: Bearer {{kacToken}}
+
+### 6. KAC submits a new staff member (transaction: staff + AML + scope + review queue)
+POST {{host}}/api/staff
+Authorization: Bearer {{kacToken}}
+Content-Type: application/json
+
+{ "stationId": 1, "staffNumber": "K-1100", "fullName": "Test Engineer", "email": "test.engineer@kac.example",
+  "aml": [ { "naaId": 2, "amlNumber": "GACA-70001", "issueDate": "2026-01-01", "expiryDate": "2029-01-01" } ],
+  "scope": [ { "aircraftTypeId": 1, "scopeBasis": "AMLEndorsed", "amlIndex": 0, "category": "B1", "level": "Line", "location": "RUH", "effectiveFrom": "2026-10-30" } ] }
+
+### 7. Admin QA review queue
+GET {{host}}/api/review-queue
+Authorization: Bearer {{adminToken}}
+
+### 8. Approve a staff submission (use the staffId from the queue)
+PUT {{host}}/api/staff/3/review
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "decision": "Approved", "comment": "Documents verified." }
+
+### 9. KAC submits a training session (trainer 1 = Omar Haddad, attendee 1)
+POST {{host}}/api/training-sessions
+Authorization: Bearer {{kacToken}}
+Content-Type: application/json
+
+{ "stationId": 1, "trainerStaffId": 1, "sessionDate": "2026-10-30", "venue": "RUH training room", "materialIds": [ 2 ], "attendeeStaffIds": [ 1 ] }
+
+### 10. Approve the session: queue item, session, certificate records and counter in ONE transaction
+POST {{host}}/api/training-sessions/1/approve
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "notes": "Approved." }
+
+### 11. Approving it a second time is refused (409): the queue item is no longer Pending
+POST {{host}}/api/training-sessions/1/approve
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "notes": "Again." }
+
+### 12. Freeze and unfreeze (each writes the Admin Actions Log in the same transaction)
+POST {{host}}/api/staff/1/freeze
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "freezeReasonId": 2, "notes": "Refresher overdue" }
+
+###
+POST {{host}}/api/staff/1/unfreeze
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{ "notes": "Refresher completed" }
